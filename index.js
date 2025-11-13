@@ -9,8 +9,6 @@ import bcrypt from "bcryptjs";
 dotenv.config();
 
 
-const ROLES = ["weather", "products"];
-
 const app = express();
 app.use(helmet());
 app.use(cors({ origin: "*"}));
@@ -33,62 +31,33 @@ function signToken(payload) {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 }
 
-function authMiddleware(req, res, next) {
-  const auth = req.headers.authorization || "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
-  if (!token) return res.status(401).json({ message: "Missing token" });
-
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded; // { id, email, roles }
-    return next();
-  } catch (err) {
-    return res.status(401).json({ message: "Invalid or expired token" });
-  }
-}
-
-function requireRoles(...needOneOf) {
-  return (req, res, next) => {
-    const userRoles = req.user?.roles || [];
-    const ok = needOneOf.some((r) => userRoles.includes(r));
-    if (!ok) return res.status(403).json({ message: "Forbidden: insufficient role" });
-    next();
-  };
-}
-
-function sanitizeRoles(inputRoles = []) {
-  if (!Array.isArray(inputRoles)) return [];
-  const uniq = Array.from(new Set(inputRoles));
-  return uniq.filter((r) => ROLES.includes(r));
-}
-
 // ---------- Auth Routes ----------
 
 /**
  * POST /auth/signup
- * body: { email, password, roles?: ["weather","products"] }
+ * body: {fullname, email, password }
  * Returns: { user, token }
  */
 app.post("/auth/signup", async (req, res) => {
   try {
-    const { email, password, roles = [] } = req.body || {};
-    if (!email || !password) {
-      return res.status(400).json({ message: "email and password are required" });
+    const { fullname, email, password } = req.body || {};
+    if (!fullname || !email || !password) {
+      return res.status(400).json({ message: "fullname, email and password are required" });
     }
     if (users.has(email)) {
       return res.status(409).json({ message: "Email already registered" });
     }
 
-    const rolesClean = sanitizeRoles(roles);
+    
     const id = `u_${Math.random().toString(36).slice(2, 10)}`;
     const passwordHash = await bcrypt.hash(password, 10);
 
-    const user = { id, email, passwordHash, roles: rolesClean };
+    const user = { id, fullname, email, passwordHash };
     users.set(email, user);
 
-    const token = signToken({ id, email, roles: user.roles });
+    const token = signToken({ id, email });
     return res.status(201).json({
-      user: { id, email, roles: user.roles },
+      user: { id, fullname, email },
       token
     });
   } catch (e) {
@@ -110,8 +79,8 @@ app.post("/auth/login", async (req, res) => {
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return res.status(401).json({ message: "Invalid credentials" });
 
-    const token = signToken({ id: user.id, email: user.email, roles: user.roles });
-    return res.json({ user: { id: user.id, email: user.email, roles: user.roles }, token });
+    const token = signToken({ id: user.id, email: user.email});
+    return res.json({ user: { id: user.id,fullname: user.fullname, email: user.email}, token });
   } catch (e) {
     return res.status(500).json({ message: "Server error", error: e.message });
   }
@@ -128,12 +97,11 @@ app.listen(PORT, () => {
 // ---------- Seed users for quick testing ----------
 async function seedUsers() {
   const seed = [
-    { email: "weather@demo.io", password: "password123", roles: ["weather"] },
-    { email: "products@demo.io", password: "password123", roles: ["products"] },
-    { email: "both@demo.io",    password: "password123", roles: ["weather","products"] }
+    { fullname: "user1", email: "user@1", password: "password123" },
+    { fullname: "user2", email: "user@2", password: "password123" },
   ];
   for (const u of seed) {
     const hash = await bcrypt.hash(u.password, 10);
-    users.set(u.email, { id: `seed_${u.email}`, email: u.email, passwordHash: hash, roles: u.roles });
+    users.set(u.email, { id: `seed_${u.email}`, email: u.email, passwordHash: hash });
   }
 }
